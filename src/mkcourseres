@@ -1,0 +1,12 @@
+#!/bin/sh
+
+domain=$1
+shift
+
+for code in $*
+do
+    printf "ccr '%s@%s' '' displayName '%s' zimbraCalResType '%s' zimbraHideInGal '%s'\n" \
+	"${code}" "${domain}" "${code}" "Location" "TRUE"
+done |
+zmprov
+

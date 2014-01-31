@@ -1,0 +1,25 @@
+#
+# A script to mount a restored Zimbra mailbox.
+#
+#
+
+PREFIX=restored_
+
+if [ "$#" -lt "2" ]
+then
+	echo "Usage: $0 <user@host> <restoreToTime>"
+	exit 1
+fi
+
+ACCOUNT=$1
+RESTORED_ACCOUNT=${PREFIX}${ACCOUNT}
+RESTORETOTIME=$2
+
+HOST=`zmprov ga $ACCOUNT zimbraMailHost | 
+        awk -F': ' '/^zimbraMailHost:/{print $2}'`
+
+#zmrestore -ca -pre ${PREFIX} -a ${ACCOUNT} -s $HOST -restoreToTime ${RESTORETOTIME}
+
+zmmailbox -z -m ${RESTORED_ACCOUNT} mfg / account ${ACCOUNT} rwidx
+zmmailbox -z -m ${ACCOUNT} cm /Restored_${RESTORETOTIME} ${RESTORED_ACCOUNT} /
+

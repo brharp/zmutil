@@ -1,0 +1,95 @@
+#!/bin/sh
+#######################################################################
+# zmsoapstat
+# Copyright 2011
+# Computing and Communications Services
+# University of Guelph
+# 
+#Usage: Usage: zmsoapstat [-r soapmethod] [-m month] [-y year]
+#Usage: 
+#Usage: zmsoapstat is a program for printing SOAP method response
+#Usage: times averaged over a one month period. Stats are read from
+#Usage: the `zmstat' directory. Recognizing that the most interesting
+#Usage: intervals are "busy" times when the server is under significant
+#Usage: load, zmsoapstat filters out intervals with fewer than 100, 200,
+#Usage: 300, ... method calls per minute. The upper limit is determined
+#Usage: automatically as the first to report no intervals over the entire
+#Usage: data range.
+#Usage:
+#Usage: zmsoapstat prints a table with the following columns:
+#Usage:     Lim      - minimum call limit: intervals with fewer than 
+#Usage:                Lim calls per minute are excluded from the average
+#Usage: 
+#Usage:     Int      - number of intervals (minutes) included in the 
+#Usage:                average
+#Usage: 
+#Usage:     AvgCnt   - average number of calls per interval (minute)
+#Usage: 
+#Usage:     AvgMs    - average response time (milliseconds)
+#Usage:
+#Usage: OPTIONS
+#Usage:     -r       - print stats on the given SOAP method. Defaults
+#Usage:                to SearchRequest.
+#Usage: 
+#Usage:     -m       - month to display (Jan = 1). Defaults to the
+#Usage:                current month.
+#Usage: 
+#Usage:     -y       - four digit year to display. Defaults to the 
+#Usage:                current year.
+#Usage: 
+#Usage: Written by M. Brent Harp.
+#Usage: Report bugs to brharp@uoguelph.ca.
+#Usage: Version $Rev: 361 $.
+
+hostname=$(hostname)
+homedir=${HOME:-/opt/zimbra}
+bindir=${homedir}/bin
+zmhostname=${bindir}/zmhostname
+statdir=${homedir}/zmstat
+soapmethod=SearchRequest
+month=$(date +%m)
+year=$(date +%Y)
+limit=0
+
+while [ true ]
+do
+ case $1 in
+ -r) soapmethod=$2
+     shift 2
+     ;;
+ -m) month=$2
+     shift 2
+     ;;
+ -y) year=$2
+     shift 2
+     ;;
+ -*) grep '^#Usage: ' $0 | sed -e 's/^#Usage: //'
+     exit 0
+     ;;
+ *)  break;
+     ;;
+ esac
+done
+
+range=${year}-${month}-??
+statfile=${statdir}/${range}/soap.csv.gz
+
+if [ -x "${zmhostname}" ]
+then
+ hostname=`${zmhostname}`
+fi
+
+printf "%s\t%s\t%s/%s\n" "${soapmethod}" "${hostname}" "${month}" "${year}"
+printf "%4.4s %6.6s %9.9s %9.9s\n" "Lim" "Int" "AvgCnt" "AvgMs"
+
+while (
+ zgrep ${soapmethod} ${statfile} |
+  awk -F, -vlimit=${limit} '
+  $3 > limit { count += $3; sum += $4; n++ }
+  END { if (n > 0) { printf "%4d %6d %9.3f %9.3f\n", limit, n, count/n, sum/n; }
+        else { exit(1) } }
+ ')
+do
+ limit=$(echo $((limit + 100)))
+done
+

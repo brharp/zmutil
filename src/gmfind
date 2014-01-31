@@ -1,0 +1,96 @@
+#!/bin/sh
+
+# Setup Zimbra environment
+. /opt/zimbra/bin/zmshutil && zmsetvars
+
+zmprov='/opt/zimbra/bin/zmprov'
+ldapsearch='/var/local/zimbra/bin/ldsearch'
+postproc='/bin/cat'
+action='/bin/echo {}'
+filter=''
+sizelimit=0
+
+while [ "$*" ]
+  do
+  case $1 in
+      -a)
+          filter="(zimbraAccountStatus=$2)${filter}"
+          shift 2
+          ;;
+      -C)
+          cosId=`$zmprov gc $2 | awk '/^zimbraId:/{print $2}'`
+          filter="(zimbraCOSId=$cosId)${filter}"
+          shift 2
+          ;;
+      -e)
+          postproc=$zmprov
+          action="echo "
+          shift
+          while [ "$1" != ';' ]
+            do
+            if [ -z "$1" ]
+                then
+                echo 1>&2 syntax error
+                exit 1
+            fi
+            action="${action} $1"
+            shift;
+          done
+          shift
+          ;;
+      -f)
+          filter="(zimbraFeature$2Enabled=TRUE)${filter}"
+          shift 2
+          ;;
+      -F)
+          filter="(zimbraPrefMailForwardingAddress=$2)${filter}"
+          shift 2
+          ;;
+      -g)
+          filter="(zimbraMailForwardingAddress=$2)${filter}"
+          shift 2
+          ;;
+      -H)
+          filter="(zimbraMailHost=$2)${filter}"
+          shift 2
+          ;;
+      -L)
+          timestamp=$(date +%Y%m%d%H%M%SZ -d "$2")
+          filter="(zimbraLastLogonTimestamp<=$timestamp)${filter}"
+          shift 2
+          ;;
+      -m)
+          filter="(mail=$2)${filter}"
+          shift 2
+          ;;
+      -p)
+          filter="(zimbraPrefZimlets=$2)${filter}"
+          shift 2
+          ;;
+      -Q)
+          filter="(zimbraMailQuota=$2)${filter}"
+          shift 2
+          ;;
+      -u)
+          filter="(uid=$2)${filter}"
+          shift 2
+          ;;
+      -z)
+          filter="(zimbraZimletAvailableZimlets=$2)${filter}"
+          shift 2
+          ;;
+      -Z)
+          sizelimit=$2
+          shift 2
+          ;;
+      -*)
+          echo unknown option $1
+          exit 1
+          ;;
+  esac
+done
+
+($ldapsearch -LLL -z ${sizelimit} "(&${filter})" "uid" |
+    awk -F': ' '/^uid:/{print $2}' |
+    xargs -n1 --replace $action |
+    $postproc | sed -e 's/prov> //g')

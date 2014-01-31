@@ -1,0 +1,106 @@
+#!/bin/sh
+
+nosync=
+if [ "${1}" == "--nosync" ]
+then
+	nosync=1
+	shift
+fi
+
+account=$1; shift
+restore_to_time=$1; shift
+
+foldersarg="$@"
+for f in "$@"
+do
+	folders="--folder \"$f\" ${folders}"
+done
+
+function usage ()
+{
+	echo Usage: restore [account] [restore_to_time] [folders...]
+	exit
+}
+
+if [ "x${account}" == "x" ]
+then
+	usage
+	exit
+fi
+
+if [ "x${restore_to_time}" == "x" ]
+then
+	usage
+	exit
+fi
+
+basedir=/var/local/zimbra
+imapsync=${basedir}/bin/imapsync
+logdir=${basedir}/log
+host1=ganges.cs.uoguelph.ca
+host2=ganges.cs.uoguelph.ca
+zmprov=/opt/zimbra/bin/zmprov
+zmrestore=/opt/zimbra/bin/zmrestore
+zmmailbox=/opt/zimbra/bin/zmmailbox
+zmbackupquery=/opt/zimbra/bin/zmbackupquery
+prefix=restored_
+
+function log ()
+{
+	level=$1; shift
+	message=$1; shift
+	logger -s -p local0.$level -t restore "<$level> $message"
+}
+
+# get mailhost
+mailhost=`zmprov ga ${account} | awk '/zimbraMailHost:/{print $2}'`
+
+# search for backups
+label=`$zmbackupquery -a ${account} -s ${mailhost} --type full --to ${restore_to_time} | awk '/Label:/{print $2; exit}'`
+
+if [ "x${label}" == "x" ]
+then
+  log error "label not found (uid=${account};restore_to_time=${restore_to_time})"
+  exit
+fi
+
+# restore mailbox
+$zmrestore -ca -a ${account} -pre ${prefix} -lb ${label} -restoreToTime ${restore_to_time} -s ${mailhost} --ignoreRedoErrors
+
+if [ "${nosync}" ]
+then
+	log info "restore complete (uid=${account};date=${restore_to_time};folders=${foldersarg:-/};nosync=${nosync})"
+	exit 0
+fi
+
+# set a temporary password
+pwd=`mktemp -u XXXXXXXX`
+$zmprov sp ${account} $pwd > /dev/null
+if [ "$?" != "0" ]
+then
+    log error "zmprov sp failed (uid=${account})"
+	exit
+fi
+$zmprov sp ${prefix}${account} $pwd > /dev/null
+if [ "$?" != "0" ]
+then
+	log error "zmprov sp failed (uid=${prefix}${account})"
+	exit
+fi
+
+# copy mail
+$imapsync \
+	--host1 ${host1} --host2 ${host2} \
+	--user1 ${prefix}${account} --user2 ${account} \
+	--password1 ${pwd} --password2 ${pwd} \
+	--subscribe --noauthmd5 ${folders} \
+	> $logdir/${account}-imap.log 2>&1
+if [ "$?" != "0" ]
+then
+	log error "imapsync failed (uid=${account})"
+	exit
+fi
+
+$zmprov da "${prefix}${account}"
+
+log info "restore complete (uid=${account};date=${restore_to_time};folders=${foldersarg:-/})"

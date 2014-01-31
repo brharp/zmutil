@@ -1,0 +1,5 @@
+
+awk '{printf "https://mail.uoguelph.ca/home/%s@uoguelph.ca/Calendar.html\n", $1}' |
+xargs curl -s -w "%{http_code} %{url_effective}\n" -I |
+grep '^200'
+

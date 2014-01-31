@@ -1,0 +1,17 @@
+#!/bin/sh
+
+domain=$1
+shift
+
+createDlCmd="cdl '%s'\
+ zimbraHideInGAL '%s'\
+ zimbraMailStatus '%s'\
+ zimbraDistributionListSendShareMessageFromAddress '%s'"
+
+for code in $*
+do
+    group="#${code}@${domain}"
+    printf "${createDlCmd}\n" "TRUE" "disabled" "${code} <noreply@uoguelph.ca>" "${group}"
+done |
+zmprov
+

@@ -1,0 +1,64 @@
+
+if [ $# -ne 2 ]
+then
+	echo "Usage: $0 CMS-NAME CMS-USER"
+	exit 1
+fi
+
+CMSNAME=$1
+CMSUSER=$2
+
+CMSDOMAIN=UOGUELPH.CA
+CMSLIST="CMS-${CMSNAME}-USERS@${CMSDOMAIN}"
+CMSACCOUNT="CMS-${CMSNAME}-ARCHIVE@${CMSDOMAIN}"
+
+CMSINBOX="/Inbox"
+CMSCONTACTS="/Contacts"
+CMSINBOXFOLDER="/${CMSNAME} CMS's Inbox"
+CMSCONTACTSFOLDER="/${CMSNAME} CMS's Contacts"
+
+zmprov="/opt/zimbra/bin/zmprov"
+zmgdlm="/var/local/zimbra/bin/zmgdlm"
+
+# Add user to DL.
+
+echo $zmprov adlm "${CMSLIST}" ${CMSUSER}
+
+# Add global shares.
+
+printf 'sm "%s"\n' "${CMSUSER}"
+printf 'cm "%s" "%s" "%s"\n' "${CMSINBOXFOLDER}" "${CMSACCOUNT}" "${CMSINBOX}"
+printf 'cm "%s" "%s" "%s"\n' "${CMSCONTACTSFOLDER}" "${CMSACCOUNT}" "${CMSCONTACTS}"
+
+# Share Calendar and Tasks
+
+printf 'mfg /Calendar group "%s" rwidx\n' "${CMSLIST}"
+printf 'mfg /Tasks group "%s" rwidx\n' "${CMSLIST}"
+
+# Add user shares.
+
+$zmgdlm "${CMSLIST}" |
+	while read CMSPEER
+	do
+		if [ "${CMSPEER}" != "${CMSUSER}" ]
+		then
+			CMSPEERNAME=`$zmprov ga ${CMSPEER} cn | awk -F': ' '/^cn:/{print $2}'`
+			printf 'cm "%s" "%s" "%s"\n' "/${CMSPEERNAME}'s Calendar" "${CMSPEER}" "/Calendar"
+			printf 'cm "%s" "%s" "%s"\n' "/${CMSPEERNAME}'s Tasks" "${CMSPEER}" "/Tasks"
+		fi
+	done
+
+CMSUSERNAME=`$zmprov ga ${CMSUSER} cn | awk -F': ' '/^cn:/{print $2}'`
+
+$zmgdlm "${CMSLIST}" |
+	while read CMSPEER
+	do
+		if [ "${CMSPEER}" != "${CMSUSER}" ]
+		then
+			printf 'sm "%s"\n' "${CMSPEER}"
+			printf 'cm "%s" "%s" "%s"\n' "/${CMSUSERNAME}'s Calendar" "${CMSUSER}" "/Calendar"
+			printf 'cm "%s" "%s" "%s"\n' "/${CMSUSERNAME}'s Tasks" "${CMSUSER}" "/Tasks"
+		fi
+	done
+
+

@@ -1,0 +1,83 @@
+#!/bin/sh
+
+if [ $# -lt 2 ]
+then
+	echo "Usage: $0 calendar uid [ ... ]"
+	exit 1
+fi
+
+METHOD=PUBLISH
+if [ "$1" == "-c" ]
+then
+	METHOD=CANCEL
+	shift
+fi
+
+if [ ! -r $1 ]
+then
+	echo "Error: input file '$1' is unreadable"
+	exit 2
+fi
+
+file=$1
+shift
+
+tmpfile=`mktemp`
+
+# Pipe the raw ICS file through sed to clean it up:
+#   Remove the organizer: the recipient becomes the organizer.
+#   Remove the time stamp: added automatically by the server.
+#   Change BUSY to FREE time.
+#   To remove alarms add:
+#		/^BEGIN:VALARM/,/^END:VALARM/d
+#   To change PRIVATE to PUBLIC add:
+#       /^CLASS[:;]/s/PRIVATE/PUBLIC/
+
+sed "
+/^METHOD[:;]/s/:.*$/:$METHOD/
+/^ORGANIZER[:;]/d
+/^DTSTAMP[:;]/d
+/^X-MICROSOFT-CDO-INTENDEDSTATUS[:;]/s/BUSY/FREE/
+" < ${file} > ${tmpfile}
+
+# If we couldn't write a temp file, abort.
+if [ $? != 0 ]
+then
+	echo "Error: $0: writing file: ${tmpfile}"
+	exit 2
+fi
+
+if [ ${USER} != "zimbra" ]
+then
+	echo "Must run as zimbra!"
+        cat ${tmpfile} 1>&2
+	rm ${tmpfile}
+	exit 1
+fi
+
+# For each UID argument, post the cleaned up calendar.
+# All the events from the ICS file will be added to /Calendar.
+# The following for loop generates a sequence of zmmailbox
+# commands which are piped into zmmailbox (run with admin rights.)
+# Errors are time stamped and logged to postcal.log.
+
+LOGFILE=/var/local/zimbra/log/postcal.log
+
+function log ()
+{
+        level=$1; shift
+        message=$1; shift
+        logger -s -p local0.$level -t postcal "<$level> $message"
+}
+
+for uid in $*
+do
+	log info "${METHOD} [${file}] to <${uid}>" 
+	echo sm ${uid}			# "select mailbox ${uid}"
+	echo pru -u https://localhost:7071 /Calendar ${tmpfile}	# "post REST URL /Calendar"
+done | 
+/opt/zimbra/bin/zmmailbox -z 2>&1 >/dev/null |
+awk '{printf(strftime("%b %e %T "));print}' >>$LOGFILE
+
+rm ${tmpfile}
+

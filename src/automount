@@ -1,0 +1,41 @@
+#!/bin/env clisp
+
+;;; Zimbra Share Automounter - M. Brent Harp
+;;; Copyright 2012 University of Guelph
+;;;
+;;; Licensed under the Apache License, Version 2.0 (the "License");
+;;; you may not use this file except in compliance with the License.
+;;; You may obtain a copy of the License at
+;;;
+;;;     http://www.apache.org/licenses/LICENSE-2.0
+;;;
+;;; Unless required by applicable law or agreed to in writing, software
+;;; distributed under the License is distributed on an "AS IS" BASIS,
+;;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;;; See the License for the specific language governing permissions and
+;;; limitations under the License.
+;;;
+;;; This script mounts all unaccepted folders that have been shared 
+;;; with a user via a distribution list. Accounts must have the
+;;; ``ca_uoguelph_ccs_automount'' Zimlet enabled, either through
+;;; their COS or preferences.
+
+(require "zimbra")
+
+(defvar *automount-conf* "/var/local/zimbra/etc/automount.conf")
+
+;; If a local config file exists and is readable,
+;; load it now.
+(when (probe-file *automount-conf*)
+  (load *automount-conf*))
+
+(zimbra-admin-auth)
+
+(dolist (account (zimbra-admin-zimlet-enabled "ca_uoguelph_ccs_automount"))
+  (let ((name (zimbra-account-name account)))
+    (zimbra-admin-delegate-auth name)
+    (zimbra-mount-shares)))
+
+(quit)
+
+;;; -*- Mode: Lisp; Syntax: Common-Lisp -*-

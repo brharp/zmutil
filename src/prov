@@ -1,0 +1,96 @@
+WORKDIR="/var/local/zimbra/"
+REMOTE="alertadm@winston:/var/mail/mailadm/zimbra/account2zimbra.cmd"
+LOCAL="account.zmprov"
+ID="${HOME}/.ssh/zimbra_identity"
+SCP="scp -B -i $ID"
+LOGGER="/usr/bin/logger -t $0"
+INFO="mail.info"
+ERR="mail.error"
+STAT="/usr/bin/stat"
+BACKUP="$LOCAL.`date +%w`"
+MV="/bin/mv"
+ZMPROV="/opt/zimbra/bin/zmprov"
+AWK="/usr/bin/awk"
+CD="cd"
+
+if $CD $WORKDIR
+then
+    $LOGGER -p $INFO "Working dir is now '$WORKDIR'"
+else
+    $LOGGER -p $ERR "Can't cd to '$WORKDIR' ('$CD' returned '$?'.)"
+    exit 2;
+fi
+
+#
+# Get remote provisioning file.
+#
+if $SCP $REMOTE $LOCAL
+then
+    SIZE=`$STAT -c%s $LOCAL`
+    $LOGGER -p $INFO "Transferred '$REMOTE' to '$LOCAL' ($SIZE bytes.)"
+    #
+    # Test file size.
+    #
+    if [ "$SIZE" = "0" ]
+    then
+        $LOGGER -p $INFO "File is empty. Exiting."
+        exit 0
+    fi
+    #
+    # Provision accounts.
+    #
+    if $ZMPROV < $LOCAL
+    then
+        $LOGGER -p $INFO "Provisioning complete."
+        #
+        # Populate new accounts.
+        #
+        $AWK '
+            BEGIN {
+                IGNORECASE = "1";
+                zmmailbox = "/opt/zimbra/bin/zmmailbox -z";
+            }
+            $1 == "createAccount" || $1 == "ca" {
+                print "sm", $2 | zmmailbox;
+                print "pru", "/Inbox", "share/Getting_Started.eml" | zmmailbox;
+                print "pru", "/Notebook/Getting_Started_with_Documents?fmt=wiki",
+                      "share/Getting_Started_with_Documents.html" | zmmailbox;
+                print "pru", "/Briefcase/Getting_Started_with_Briefcase.doc",
+                      "share/Getting_Started_with_Briefcase.doc" | zmmailbox;
+                print "pru", "/Briefcase/Getting_Started_with_Briefcase.pdf",
+                      "share/Getting_Started_with_Briefcase.pdf" | zmmailbox;
+                print "cm", "/Community", "usr.share@uoguelph.ca", "/" | zmmailbox;
+            }
+            END {
+                close(zmmailbox);
+            }
+        ' < $LOCAL || {
+            $LOGGER -p $ERR "Welcome message failed ('$AWK' returned '$?'.)"
+        }
+        if $MV $LOCAL $BACKUP
+        then
+            $LOGGER -p $INFO "Moved '$LOCAL' to '$BACKUP'."
+        else
+            $LOGGER -p $ERR "Failed to copy '$LOCAL' to '$BACKUP'."
+            exit 2
+        fi
+        #
+        # Truncate remote file.
+        #
+        cat /dev/null > $LOCAL
+        if $SCP $LOCAL $REMOTE
+        then
+            $LOGGER -p $INFO "Truncated '$REMOTE'."
+        else
+            $LOGGER -p $ERR "Failed to truncate '$REMOTE' ('$SCP' returned '$?'.)"
+            exit 2
+        fi
+    else
+        $LOGGER -p $ERR "Provisioning failed ('$ZMPROV' returned '$?'.)"
+        exit 2
+    fi
+else
+    $LOGGER -p $ERR "Failed to transfer '$REMOTE' to '$LOCAL' ('$SCP' returned '$?'.)"
+    exit 2
+fi
+

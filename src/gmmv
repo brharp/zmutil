@@ -1,0 +1,61 @@
+
+if [ `whoami` == "zimbra" ]
+then
+    zmprov="/opt/zimbra/bin/zmprov"
+    zmmailboxmove="/opt/zimbra/bin/zmmailboxmove"
+else
+    zmprov="sudo -u zimbra /opt/zimbra/bin/zmprov"
+    zmmailboxmove="sudo -u zimbra /opt/zimbra/bin/zmmailboxmove"
+fi
+
+case $# in
+    0|1)
+	echo 1>&2 "usage: $0 <target> <account> ..."
+	exit 1
+	;;
+    *)
+	target=$1; shift
+	;;
+esac
+
+function movepurge ()
+{
+    account=$1; shift
+    source=$1; shift
+    target=$1; shift
+    
+    trap "" 1 3 15		# once we move, we're committed
+    logger -s -t $0 -p mail.info "starting mailbox move (account=$account; source=$source; target=$target)"
+    if $zmmailboxmove -a $account -s $source -t $target
+	then
+        logger -s -t $0 -p mail.info "move complete (account=$account; source=$source; target=$target)"
+        logger -s -t $0 -p mail.info "starting mailbox purge (account=$account; source=$source)"
+        $zmmailboxmove -a $account -s $source -po
+        logger -s -t $0 -p mail.info "purge complete (account=$account; source=$source)"
+    else
+        logger -s -t $0 -p mail.info "move failed (account=$account; source=$source; target=$target)"
+    fi
+    trap "exit 1" 1 3 15
+}
+
+for account in $*
+  do
+	# retrieve account's mailhost
+  mailhost=`$zmprov ga $account zimbraMailHost | 
+			awk '/^zimbraMailHost:/{print $2}'`
+  
+	# test mailhost against empty string ...
+  if [ -z "$mailhost" ]
+      then
+      logger -s -t $0 -p mail.info "no mailhost (account=$account)"
+      exit 2
+  fi
+  
+	# ... and requested target server
+  if [ "$mailhost" == "$target" ]
+      then
+      logger -s -t $0 -p mail.info "$mailhost and $target are the same (account=$account)"
+  else
+      movepurge $account $mailhost $target
+  fi
+done

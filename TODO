@@ -1,0 +1,22 @@
+
+* Improve Packaging
+
+Installing and verifying all of our customizations (scripts, theme
+changes, etc.) should be as simple as unpacking this package on the
+Zimbra server and running:
+
+  make
+  make test
+  make install
+
+For this to work, some changes are required:
+
+  * all programs must compile cleanly,
+
+  * test data must be available in data/,
+
+  * tests written that check the programs in the zimbra environment,
+
+  * hard coded paths (i.e. in `prov') parameterized.
+
+

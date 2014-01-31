@@ -1,0 +1,40 @@
+#!/bin/sh
+
+host=$1
+method=$2
+range=$3
+m=$4
+b=$5
+avgmsmax=$6
+countmax=$7
+datafile=$(mktemp)
+
+# Retreive data.
+ssh ${host} zgrep -h ${method} /opt/zimbra/zmstat/${range}*/soap.csv.gz |
+    tr ',' '\t' > ${datafile}
+
+# Plot data.
+gnuplot <<ENDPLOT
+set term png
+
+# Avg Response Time
+set yrange [0:${avgmsmax}]
+set output "${host}-${method}-avgms-${range}.png"
+set xlabel "request count"
+set ylabel "avg response time (ms)"
+plot "${datafile}" using 4:5 smooth unique title "${host} ${method} (avgms) ${range}", ${m}*x+${b}
+
+# Request Count
+set xdata time
+set xlabel "date"
+set ylabel "request count"
+set timefmt "%m/%d/%Y %H:%M:%S"
+set format x "%d/%m"
+set yrange [0:${countmax}]
+set output "${host}-${method}-count-${range}.png"
+plot "${datafile}" using 1:4 smooth unique title "${host} ${method} (count) ${range}"
+
+ENDPLOT
+
+rm -f ${datafile}
+

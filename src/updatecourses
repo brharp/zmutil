@@ -1,0 +1,7 @@
+#!/bin/sh
+
+curl 'http://vincy.cs.uoguelph.ca/schedules/' | 
+grep -o 'href="CALENDAR\.[A-Z0-9*]*\.ics"' |
+sed -e 's/href="CALENDAR\.\([A-Z0-9*]*\)\.ics"$/\1/'  >\
+/var/local/zimbra/etc/courses
+

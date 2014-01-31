@@ -1,0 +1,241 @@
+#!/bin/env clisp
+
+;;; Zimbra Daily Agenda - M. Brent Harp
+;;; Copyright 2012 University of Guelph
+;;;
+;;; Licensed under the Apache License, Version 2.0 (the "License");
+;;; you may not use this file except in compliance with the License.
+;;; You may obtain a copy of the License at
+;;;
+;;;     http://www.apache.org/licenses/LICENSE-2.0
+;;;
+;;; Unless required by applicable law or agreed to in writing, software
+;;; distributed under the License is distributed on an "AS IS" BASIS,
+;;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;;; See the License for the specific language governing permissions and
+;;; limitations under the License.
+;;;
+;;; This script sends a daily agenda by email. The agenda is taken from 
+;;; a Zimbra calendar, and mailed to the account owner. The agenda includes
+;;; the start and end times for all appointments in personal calendars. 
+;;; Shared calendars are not included. The accounts to received a daily
+;;; agenda are those with the ``ca_uoguelph_ccs_agenda'' Zimlet enabled, either 
+;;; through COS settings or personal preferences. The Zimlet must also be
+;;; deployed for this script to work properly.
+;;;
+;;; The program depends on the Common Lisp Zimbra SOAP Client Library, which
+;;; reads configuration information from a local config file (typically
+;;; ``/etc/zimbra.conf''. The host, admin host, and admin account credentials
+;;; (user name and password) must be configured in the SOAP library configuration
+;;; file. The client library itself must be locatable by `require'. This is 
+;;; most easily accomplished by linking ``/usr/local/lib/lisp'' to your lisp's
+;;; module directory.
+;;;
+;;; Procedure:
+;;; 
+;;; 1. Get a list of accounts with "agenda" zimlet enabled. The zimlet could
+;;; be mandatory through the class of service, enabled through that class of
+;;; service and not disabled through preferences, or disabled by the class of
+;;; service and enabled through preferences.
+;;;
+;;; 2. For each account, acquire a list of folders. Remove any folders that
+;;; are not calendar folders.
+;;;
+;;; 3. Search for appointments in any calendar folder between midnight last
+;;; night and midnight tonight (local time).
+;;;
+;;; 4. Sort the appointments by start time.
+;;;
+;;; 5. Print a list of appointment summaries in plain text format and HTML
+;;; format.
+;;;
+;;; 6. Collect the appointment summary listings into a multipart mail message.
+;;;
+;;; 7. Mail the multipart message.
+;;;
+
+(require "zimbra")
+
+(defvar *disclaimer*
+  "You received this email from the Daily Agenda Zimlet for Gryph Mail and Calendar.")
+
+(defvar *agenda-conf* "/var/local/zimbra/etc/agenda.conf")
+
+(when (probe-file *agenda-conf*)
+  (load *agenda-conf*))
+
+(defun calendar-p (folder)
+  (equal "appointment" (zimbra-folder-view folder)))
+
+(defun in-calendar-query ()
+  (let* ((folders (zimbra-folders))
+         (calendar (remove-if-not #'calendar-p folders))
+         (ids (mapcar #'zimbra-folder-id calendar)))
+    (format nil "(inid:\"~A\"~{ or inid:\"~A\"~})" (first ids) (rest ids))))
+
+(defun zimbra-agenda-request (start end)
+  (zimbra-search-request (in-calendar-query)
+      :types "appointment" :sort-by "dateAsc"
+      :cal-expand-inst-start (format nil "~A" start)
+      :cal-expand-inst-end   (format nil "~A" end)))
+
+(defun appt-start-time (appt)
+  (parse-integer (zimbra-inst-s (zimbra-appt-inst appt))))
+
+(defun zimbra-agenda (start end)
+  (let ((result (zimbra-agenda-request start end)))
+    (let ((appts (xml-get-elements-by-tag-name result "appt")))
+      (sort (mapcar #'zimbra-parse-appt appts) #'<
+            :key #'appt-start-time))))
+
+(defstruct zimbra-appt
+  uid d rev all-day status is-org ms class loc l comp-num
+  fb id alarm x-uid dur s md name fba inv-id transp ptst 
+  or inst)
+
+(defun zimbra-parse-appt (doc)
+  (let ((appt (make-zimbra-appt
+               :uid     (xml-get-attribute doc "uid")
+               :all-day (xml-get-attribute doc "allDay")
+               :status  (xml-get-attribute doc "status")
+               :is-org  (xml-get-attribute doc "isOrg")
+               :class   (xml-get-attribute doc "class")
+               :loc     (xml-get-attribute doc "loc")
+               :fb      (xml-get-attribute doc "fb")
+               :dur     (xml-get-attribute doc "dur")
+               :name    (xml-get-attribute doc "name")
+               :ptst    (xml-get-attribute doc "ptst"))))
+    (let ((inst (first (xml-get-elements-by-tag-name doc "inst"))))
+      (setf (zimbra-appt-inst appt) (zimbra-parse-inst inst)))
+    appt))
+            
+(defstruct zimbra-inst s rid-z tzo)
+
+(defun zimbra-parse-inst (doc)
+  (make-zimbra-inst :s (xml-get-attribute doc "s")
+                    :rid-z (xml-get-attribute doc "ridZ")
+                    :tzo (xml-get-attribute doc "tzo")))
+
+(defun zimbra-time-from-universal-time (&optional (time (get-universal-time)))
+  (* 1000 (- time (encode-universal-time 0 0 0 1 1 1970))))
+
+(defun zimbra-to-universal-time (time)
+  (+ (floor (/ time 1000)) (encode-universal-time 0 0 0 1 1 1970 0)))
+
+(defun midnight ()
+  (multiple-value-bind
+   (sec min hour date month year)
+   (get-decoded-time)
+   (encode-universal-time 0 0 0 date month year)))
+
+(defun zimbra-print-date-to-string (time)
+  (multiple-value-bind
+   (sec min hour date month year day daylight-p zone)
+   (decode-universal-time (zimbra-to-universal-time time))
+   (format nil "~2D:~2,'0D~A"
+           (if (> hour 12) (- hour 12) hour) min
+           (if (> hour 12) "p" "a"))))
+
+(defun print-appointment (appt)
+  (let* ((name  (zimbra-appt-name appt))
+         (start (parse-integer (zimbra-inst-s (zimbra-appt-inst appt))))
+         (end   (+ start (parse-integer (zimbra-appt-dur appt))))
+         (loc   (zimbra-appt-loc appt)))
+    (if (not (equal "1" (zimbra-appt-all-day appt)))
+      (format t "~A - ~A " (zimbra-print-date-to-string start)
+              (zimbra-print-date-to-string end))
+      (format t "  -  "))
+    (princ name)
+    (when (and loc (plusp (length loc)))
+      (format t " (~A)" loc))
+    (format t "~%~%")))
+
+(defun date (&optional (format "+%c"))
+  (read-line (popen (list "date" format) "r")))
+
+(defun print-agenda ()
+  (let* ((start (zimbra-time-from-universal-time (midnight)))
+         (end   (1- (+ start (* 1000 60 60 24))))
+         (appts (zimbra-agenda start end)))
+    (format t "*** ~A ***~%~%" (date "+%a, %b %d, %Y"))
+    (if (null appts)
+        (format t "No appointments~%")
+      (dolist (appt appts)
+        (print-appointment appt)))
+    (format t "~%~%~%~A~%" *disclaimer*)))
+
+(defun print-appointment-html (appt)
+  (let* ((name    (zimbra-appt-name appt))
+         (start   (parse-integer (zimbra-inst-s (zimbra-appt-inst appt))))
+         (end     (+ start (parse-integer (zimbra-appt-dur appt))))
+         (loc     (zimbra-appt-loc appt))
+         (all-day (equal "1" (zimbra-appt-all-day appt))))
+    (format t "<tr><td align=\"right\" valign=\"top\">")
+    (when (not all-day)
+      (format t "~A" (zimbra-print-date-to-string start)))
+    (format t "</td><td align=\"left\" valign=\"top\"> - ")
+    (when (not all-day)
+      (format t "~A " (zimbra-print-date-to-string end)))
+    (format t "~A" name)
+    (when (and loc (plusp (length loc)))
+      (format t " (~A)" loc))
+    (format t "</td></tr>~%")))
+
+(defun print-agenda-html ()
+  (let* ((start (zimbra-time-from-universal-time (midnight)))
+         (end   (1- (+ start (* 1000 60 60 24))))
+         (appts (zimbra-agenda start end)))
+    (format t "<table border=\"0\">~%")
+    (format t "<tr><th colspan=\"2\" align=\"left\">~A</td></tr>~%"
+            (date "+%a %b %d, %Y"))
+    (if (null appts)
+        (format t "<tr><td colspan=\"2\"><i>No appointments</i></td></tr>~%")
+      (dolist (appt appts)
+        (print-appointment-html appt)))
+    (format t "</table>~%")
+    (format t "<p style=\"font-size: small\">--<br/>~A</p>~%" *disclaimer*)))
+
+(defun zimbra-mail-agenda (account)
+  (with-open-file (temp (mktemp) :direction :output)
+    (let ((*standard-output* temp))
+      (format t "Subject: Daily Agenda for ~A~%To: ~A~%~%" account account)
+      (print-agenda)
+      (format t ".~%")
+      (finish-output temp))
+    (system (format nil "sendmail ~A < ~A" account (truename temp)))
+    (close temp)
+    (delete-file temp)))
+
+(defun zimbra-mail-agenda-html (account cn)
+  (with-open-file (temp (mktemp) :direction :output)
+    (let ((*standard-output* temp))
+      (format t "Subject: Daily Agenda for ~A~%" (or cn account))
+      (format t "From: ~A~%" account)
+      (format t "To: ~A~%" account)
+      (format t "MIME-Version: 1.0~%")
+      (format t "Content-Type: multipart/alternative; 
+	boundary=\"----=_Part_823717_620177132.1322847972306\"~%~%")
+      (format t "------=_Part_823717_620177132.1322847972306
+Content-Type: text/plain; charset=utf-8~%~%")
+      (print-agenda)
+      (format t "------=_Part_823717_620177132.1322847972306
+Content-Type: text/html; charset=utf-8~%~%")
+      (print-agenda-html)
+      (format t "------=_Part_823717_620177132.1322847972306--~%")
+      (format t ".~%")
+      (finish-output temp))
+    (system (format nil "sendmail ~A < ~A" account (truename temp)))
+    (close temp)
+    (delete-file temp)))
+
+(zimbra-admin-auth)
+
+(dolist (account (zimbra-admin-zimlet-enabled "ca_uoguelph_ccs_agenda"))
+  (let ((name (zimbra-account-name account))
+        (cn   (zimbra-account-cn   account)))
+    (zimbra-admin-delegate-auth name)
+    (zimbra-mail-agenda-html name cn)))
+
+(quit)
+
+;;; -*- Mode: Lisp; Syntax: Common-Lisp -*-

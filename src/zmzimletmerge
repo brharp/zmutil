@@ -1,0 +1,35 @@
+#!/bin/sh
+
+##
+# zmzimletmerge
+#
+# M. Brent Harp 2011
+#
+# Merges available zimlets from COS and account settings. Account
+# settings override COS settings.
+#
+
+for uid in $*
+do
+cos_id=`zmprov ga $uid | awk -F': ' '/^zimbraCOSId:/{print $2}'`
+cos=`zmprov gc $cos_id | awk -F': ' '/^cn:/{print $2}'`
+
+(zmprov gc $cos zimbraZimletAvailableZimlets;
+ zmprov ga $uid zimbraZimletAvailableZimlets) |
+awk -F": " "
+/zimbraZimletAvailableZimlets:/ {
+  zimlet_id = substr (\$2, 2);
+  zimlet_on = substr (\$2, 0, 1);
+  zimlet[zimlet_id] = zimlet_on;
+}
+END {
+  printf \"ma $uid zimbraZimletAvailableZimlets ''\n\"
+  for (id in zimlet) {
+     printf \"ma $uid +zimbraZimletAvailableZimlets %s%s\n\", zimlet[id], id;
+  }
+}
+"
+done | zmprov
+
+
+

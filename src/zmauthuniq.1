@@ -1,0 +1,30 @@
+.TH ZMAUTHUNIQ "1L" "July 2009" "" "Gryph Mail Commands"
+.SH NAME
+zmauthuniq \- count unique logins
+.SH SYNOPSIS
+\fBzmauthuniq\fR < /opt/zimbra/log/audit.log > /tmp/uniq
+.SH DESCRIPTION
+.PP
+Prints the number of unique Zimbra logins in the last hour.
+.PP
+Logins are counted from one hour ago to the current time.
+Multiple logins from a single account are counted as 1.
+.PP
+This script is called from cron once per hour with the file
+redirections shown above. 
+The file /tmp/uniq is read each hour by Big Brother to 
+generate a rough graph of login activity.
+.SH FILES
+.TP
+/opt/zimbra/log/audit.log
+The Zimbra audit log. Records each login.
+.TP
+/tmp/uniq
+Expected location of current hourly login count.
+.SH BUGS
+.PP
+There is no way to specify an alternate time range.
+.PP
+There is no way to print a summary of logins per hour
+over a larger time period.
+

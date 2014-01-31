@@ -1,0 +1,360 @@
+#!/usr/bin/perl
+
+# This file is derived from the "greylist.pl" example policy server 
+# that is distributed with Postfix and is distributed under the IBM
+# Public License.
+#
+# Copyright (c) 1997,1998,1999, International Business Machines
+# Corporation and others. All Rights Reserved.
+#
+# Adaptated to impose per user outgoing mail limits by M. Brent Harp.
+#
+
+use BerkeleyDB;
+use Sys::Syslog qw(:DEFAULT setlogsock);
+
+# aupd - The acceptable use policy daemon.
+#
+# Usage: aupd [-v]
+#
+# This Postfix SMTPD policy server implements user limits.
+# State is kept in a Berkeley DB database.  Logging is
+# sent to syslogd.
+#
+# How it works: each time a Postfix SMTP server process is started
+# it connects to the policy service socket, and Postfix runs one
+# instance of this PERL script.  By default, a Postfix SMTP server
+# process terminates after 100 seconds of idle time, or after serving
+# 100 clients. Thus, the cost of starting this PERL script is smoothed
+# out over time.
+#
+# This particular policy server limits each sender address to 1000
+# recipients per day. After 1000, mail is rejected. The 24 hour
+# period begins with the first message sent.
+#
+# To test this script by hand, execute:
+#
+#    % sudo -u nobody ./aupd
+#
+# Each query is a bunch of attributes. Order does not matter, and
+# the demo script uses only a few of all the attributes shown below:
+#
+#    request=smtpd_access_policy
+#    protocol_state=RCPT
+#    protocol_name=SMTP
+#    helo_name=some.domain.tld
+#    queue_id=8045F2AB23
+#    sender=foo@bar.tld
+#    recipient=bar@foo.tld
+#    client_address=1.2.3.4
+#    client_name=another.domain.tld
+#    instance=123.456.7
+#    sasl_method=plain
+#    sasl_username=you
+#    sasl_sender=
+#    size=12345
+#    [empty line]
+#
+# The policy server script will answer in the same style, with an
+# attribute list followed by a empty line:
+#
+#    action=dunno
+#    [empty line]
+#
+#
+# INSTALL
+#
+# Test Perl and BerkeleyDB:
+# 
+#	# sudo -u nobody perl -e 'use BerkeleyDB' 
+#
+# Install aupd in /usr/local/bin:
+#
+# 	# install aupd /usr/local/bin
+# 
+# Create the database environment:
+# 
+# 	# mkdir -p /var/mta/aupd
+# 	# chown nobody /var/mta/aupd
+# 
+# Test the script:
+# 
+# 	# sudo -u nobody /usr/local/bin/aupd <<HERE
+# 	> request=smtpd_access_policy
+# 	> sender=ztest01@uoguelph.ca
+# 	> recipient_count=1
+# 	>
+# 	> HERE
+# 	action=dunno
+# 
+# Update postfix main.cf:
+# 
+# 	# echo policy_time_limit=3600 >> postfix/conf/main.cf
+# 
+# Create a new smtpd instance in master.cf (for testing):
+# 
+# 	# cp postfix/conf/master.cf postfix/conf/master.cf.bak
+#
+#	# vi postfix/conf/master.cf
+# 
+# 	# diff postfix/conf/master.cf.bak postfix/conf/master.cf
+# 	99a100
+# 	>         -o smtpd_end_of_data_restrictions=check_policy_service,unix:private/policy
+# 	108a110,112
+# 	> # Policy
+# 	> policy  unix     -       n        n      -     0    spawn
+# 	>      user=nobody argv=/usr/local/bin/aupd
+# 
+# Reload postfix:
+# 
+# 	# postfix/sbin/postfix reload
+##
+
+
+#
+# Database
+#
+$database_home="/var/mta/aupd";
+$database_name="/var/mta/aupd/sender.db";
+
+#
+# Syslogging options for verbose mode and for fatal errors.
+# NOTE: comment out the $syslog_socktype line if syslogging does not
+# work on your system.
+#
+$syslog_socktype = 'unix'; # inet, unix, stream, console
+$syslog_facility="mail";
+$syslog_options="pid";
+$syslog_priority="info";
+
+#
+# Message limit.
+#
+$message_count_limit = 10000;
+$message_count_period = 86400; # 1 day
+
+#
+# Policy function
+#
+sub smtpd_access_policy {
+
+    # Open the database on the fly.
+    open_database() unless $database_obj;
+
+    # Lookup the message count for this sender.
+    my $sender = $attr{"sender"};
+    my $recipient_count = $attr{"recipient_count"};
+
+    if ($sender eq "") {
+      # We can't restrict the mailer daemon.
+      return "dunno";
+    }
+
+    my $wlist_key = lc $sender."/w";
+    if (1 == read_database($wlist_key)) {
+      # Sender is in the whitelist.
+      return "dunno";
+    }
+
+    my $count_key = lc $sender."/c";
+    my $start_key = lc $sender."/s";
+    my $now = time();
+    my $lock = $database_obj->cds_lock();
+    my $count = read_database($count_key) || 0;
+    my $start = read_database($start_key) || 0;
+    my $action = "dunno";
+    if ($now > $start + $message_count_period) {
+        syslog $syslog_priority, "from=<$sender>, count=$count, action=reset";
+        $start = $now;
+        $count = $recipient_count;
+    } elsif ($count + $recipient_count <= $message_count_limit) {
+        $count += $recipient_count;
+    } else {
+        $action = "reject Too much mail";
+    }
+    update_database($count_key, $count);
+    update_database($start_key, $start);
+    $lock->cds_unlock();
+
+    # The result can be any action that is allowed in a Postfix access(5) map.
+    #
+    # To label mail, return ``PREPEND'' headername: headertext
+    #
+    # In case of success, return ``DUNNO'' instead of ``OK'' so that the
+    # check_policy_service restriction can be followed by other restrictions.
+    #
+    # In case of failure, specify ``DEFER_IF_PERMIT optional text...''
+    # so that mail can still be blocked by other access restrictions.
+    #
+    # Log our verdict.
+    syslog $syslog_priority, "from=<$sender>, count=$count, action=$action";
+    
+    return $action;
+}
+
+sub reset_counters {
+    my($sender) = @_;
+    my($count_key, $start_key, $wlist_key);
+    open_database() unless $database_obj;
+    $count_key = lc $sender."/c";
+    $start_key = lc $sender."/s";
+    $wlist_key = lc $sender."/w";
+    update_database($count_key, 0);
+    update_database($start_key, 0);
+    update_database($wlist_key, 0);
+}
+
+sub whitelist_sender {
+    my($sender) = @_;
+    my($wlist_key);
+    open_database() unless $database_obj;
+    $wlist_key = lc $sender."/w";
+    my $lock = $database_obj->cds_lock();
+    update_database($wlist_key, 1);
+    $lock->cds_unlock();
+}
+
+#
+# Log an error and abort.
+#
+sub fatal_exit {
+    my($first) = shift(@_);
+    syslog "err", "fatal: $first", @_;
+    print "action=dunno\n\n";
+    exit 0;
+}
+
+#
+# Open hash database.
+#
+sub open_database {
+    my($database_fd);
+
+    # Database Env required for locking.
+    my $env = new BerkeleyDB::Env(-Home   => $database_home ,
+                                  -Flags  => DB_CREATE|DB_INIT_CDB|DB_INIT_MPOOL)
+        or fatal_exit "cannot open environment: $BerkeleyDB::Error\n";
+
+    # Use tied database to make complex manipulations easier to express.
+    $database_obj = tie(%db_hash, 'BerkeleyDB::Hash', 
+                        -Filename => $database_name,
+                        -Flags    => DB_CREATE,
+                        -Env      => $env)
+        or fatal_exit "Cannot open database %s: $!", $database_name;
+
+    syslog $syslog_priority, "open %s", $database_name if $verbose;
+}
+
+#
+# Read database. Use a shared lock to avoid reading the database
+# while it is being changed. XXX There should be a way to synchronize
+# our cache from the on-file database before looking up the key.
+#
+sub read_database {
+    my($key) = @_;
+    my($value);
+
+    $value = $db_hash{$key};
+    syslog $syslog_priority, "lookup %s: %s", $key, $value if $verbose;
+    return $value;
+}
+
+#
+# Update database. Use an exclusive lock to avoid collisions with
+# other updaters, and to avoid surprises in database readers. XXX
+# There should be a way to synchronize our cache from the on-file
+# database before updating the database.
+#
+sub update_database {
+    my($key, $value) = @_;
+
+    syslog $syslog_priority, "store %s: %s", $key, $value if $verbose;
+    $db_hash{$key} = $value;
+    #$database_obj->sync() &&
+#	fatal_exit "Can't update %s: $!", $database_name;
+}
+
+#
+# Signal 11 means that we have some kind of database corruption (yes
+# Berkeley DB should handle this better).  Move the corrupted database
+# out of the way, and start with a new database.
+#
+sub sigsegv_handler {
+    my $backup = $database_name . "." . time();
+
+    rename $database_name, $backup || 
+	fatal_exit "Can't save %s as %s: $!", $database_name, $backup;
+    fatal_exit "Caught signal 11; the corrupted database is saved as $backup";
+}
+
+$SIG{'SEGV'} = 'sigsegv_handler';
+
+#
+# This process runs as a daemon, so it can't log to a terminal. Use
+# syslog so that people can actually see our messages.
+#
+setlogsock $syslog_socktype;
+openlog "aupd", $syslog_options, $syslog_facility;
+
+#
+# We don't need getopt() for now.
+#
+while ($option = shift(@ARGV)) {
+    if ($option eq "-v") {
+	$verbose = 1;
+    }
+    elsif ($option eq "-c") {
+        $sender = shift(@ARGV);
+        if ($sender eq "") {
+            fatal_exit "Option requires an argument.";
+        } else {
+            reset_counters($sender);
+            exit 0;
+        }
+    }
+    elsif ($option eq "-n") {
+        $message_count_limit = shift(@ARGV);
+    }
+    elsif ($option eq "-p") {
+        $message_count_period = shift(@ARGV);
+    }
+    elsif ($option eq "-w") {
+        whitelist_sender(shift(@ARGV));
+        exit 0;
+    }
+    else {
+	syslog $syslog_priority, 
+               "Invalid option: %s. Usage: %s [-v] [-n limit] [-p period] [-w sender]",
+               $option, $0;
+	exit 1;
+    }
+}
+
+#
+# Unbuffer standard output.
+#
+select((select(STDOUT), $| = 1)[0]);
+
+#
+# Receive a bunch of attributes, evaluate the policy, send the result.
+#
+while (<STDIN>) {
+    if (/([^=]+)=(.*)\n/) {
+	$attr{substr($1, 0, 512)} = substr($2, 0, 512);
+    } elsif ($_ eq "\n") {
+	if ($verbose) {
+	    for (keys %attr) {
+		syslog $syslog_priority, "Attribute: %s=%s", $_, $attr{$_};
+	    }
+	}
+	fatal_exit "unrecognized request type: '%s'", $attr{request}
+	    unless $attr{"request"} eq "smtpd_access_policy";
+	$action = smtpd_access_policy();
+	syslog $syslog_priority, "Action: %s", $action if $verbose;
+	print STDOUT "action=$action\n\n";
+	%attr = ();
+    } else {
+	chop;
+	syslog $syslog_priority, "warning: ignoring garbage: %.100s", $_;
+    }
+}

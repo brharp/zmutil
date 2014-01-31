@@ -1,0 +1,3 @@
+#!/bin/sh
+. /opt/zimbra/bin/zmshutil && zmsetvars
+ldapsearch -H $ldap_master_url -D $zimbra_ldap_userdn -x -w $zimbra_ldap_password $*

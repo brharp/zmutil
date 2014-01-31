@@ -1,0 +1,14 @@
+#!/bin/sh
+
+domain=$1
+shift
+
+for code in $*
+do
+  group="#${code}@${domain}"
+  resource="${code}@${domain}"
+  folder="/Schedule"
+  printf "pdlsi + '%s' '%s' '%s'\n" "${group}" "${resource}" "${folder}"
+done |
+zmprov
+

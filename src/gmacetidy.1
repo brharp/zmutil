@@ -1,0 +1,21 @@
+.TH GMACETIDY "1L" "July 2009" "" "Gryph Mail Commands"
+.SH NAME
+gmacetidy \- delete orphaned Zimbra ACEs
+.SH SYNOPSIS
+.B gmacetidy
+[\fIUID\fR]...
+.SH DESCRIPTION
+.\" Add any additional description here
+.PP
+Delete orphaned Zimbra ACE entries.
+.PP
+Zimbra access control entries (ACE) are a triple of
+user ID, type, and permission. If the user ID no longer
+exists, the ACE can not be deleted from the client 
+interface. These "orphaned" ACE appear with a UID string
+instead of an email address in the Zimbra web client.
+.PP
+This script removes from the directory any ACE granted
+by \fIUID\fR for non\-existent accounts.
+.SH AUTHOR
+M. Brent Harp

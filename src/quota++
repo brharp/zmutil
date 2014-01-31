@@ -1,0 +1,11 @@
+#!/bin/sh
+
+for uid in $*
+do
+	quota=`zmprov ga $uid zimbraMailQuota | awk -F': ' '/zimbraMailQuota:/{print $2}'`
+        if [ "$?" = "0" ]
+	then
+		zmprov ma $uid zimbraMailQuota $((quota + 1073741824))
+	fi
+done
+

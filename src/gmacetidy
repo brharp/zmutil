@@ -1,0 +1,38 @@
+. /opt/zimbra/bin/zmshutil
+
+zmsetvars
+
+#zimbra_ldap_password=6tRJd4K8M_
+#zimbra_zmprov_default_to_ldap=false
+#zimbra_ldap_userdn=uid=zimbra,cn=admins,cn=zimbra
+
+case $# in
+0)
+        echo "Usage: $0 <uid>"
+        exit 1
+        ;;
+esac
+
+function ldsearch ()
+{
+  ldapsearch -LLL -x -H $ldap_master_url -D $zimbra_ldap_userdn -w $zimbra_ldap_password $*
+}
+
+# Get UID
+uid=`ldsearch \(\|\(uid=$1\)\(mail=$1\)\) uid | awk '/^uid:/{print $2}'`
+# Find account dn
+dn=`ldsearch \(uid=$uid\) dn | awk '{print $2}'`
+echo dn: $dn
+echo changetype: modify
+echo delete: zimbraACE
+# Find ACE
+ldsearch  \(uid=$uid\) zimbraACE |
+awk '/^zimbraACE:/{print $2,$3,$4}' |
+while read uuid type perm
+do
+  case `ldsearch \(zimbraId=${uuid}\) dn | wc -l` in
+    0) echo zimbraACE: $uuid $type $perm
+       ;;
+  esac
+done
+echo

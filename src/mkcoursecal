@@ -1,0 +1,17 @@
+#!/bin/sh
+
+domain=$1
+shift
+
+for code in $*
+do
+    folder="/Schedule"
+    url="http://vincy.cs.uoguelph.ca/schedules/CALENDAR.${code}.ics"
+    group="#${code}@${domain}"
+    res="${code}@${domain}"
+    printf "sm '%s'\n" "${res}"
+    printf "cf --view appointment --color gray --url '%s' --flags '#' '%s'\n" "${url}" "${folder}"
+    printf "mfg '%s' group '%s' r\n" "${folder}" "${group}"
+done |
+zmmailbox -z
+

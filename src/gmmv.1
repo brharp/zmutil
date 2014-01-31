@@ -1,0 +1,38 @@
+.TH GMMV "1L" "July 2009" "" "Gryph Mail Commands"
+.SH NAME
+gmmv \- move Gryph Mail accounts
+.SH SYNOPSIS
+.B gmmv
+.I TARGET
+.RI "[" ACCOUNT " ...]"
+.SH DESCRIPTION
+.PP
+Moves Gryph Mail accounts between servers.
+.PP
+This script makes several improvements over moving accounts with
+zmmailboxmove alone:
+.IP \-
+the source server is determined automatically,
+.IP \-
+cases where source == target are skipped,
+.IP \-
+signals are ignored while a move is in progress,
+.IP \-
+the target server is listed first, followed by
+multiple account names, so 
+.B gmmv
+can be called easily from xargs where 
+zmmailboxmove can not, and
+.IP \-
+the old account is automatically purged if the
+move succeeds, where zmmailboxmove requires
+a separate step to purge the old mailbox.
+.SH EXAMPLES
+.nf
+# Move 10 staff from zcs1 to zcs2
+gmfind -C staff -h zcs1.mail.uoguelph.ca |
+   head -10 | xargs gmmv zcs2.mail.uoguelph.ca
+.fi
+.SH BUGS
+Signals received during a move are not 
+remembered.

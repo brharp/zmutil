@@ -1,0 +1,73 @@
+.TH GMFIND "1L" "January 2011" "" "Gryph Mail Commands"
+.SH NAME
+gmfind \- find Gryph Mail accounts
+.SH SYNOPSIS
+.B gmfind
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.PP
+Efficiently find Gryph Mail accounts, 
+with the option of applying 
+.B zmprov
+commands to each.
+
+.SH OPTIONS
+
+.TP
+\fB\-a\fR \fISTATUS\fR
+find accounts by account status (active, closed, etc.)
+
+.TP
+\fB\-C\fR \fICOSNAME\fR
+find accounts by class of service
+
+.TP
+\fB\-e\fR \fIPROVCMD\fR
+run zmprov command \fIPROVCMD\fR for each
+account found. Only one instance of
+.B zmprov
+is run, so this can be much faster than spawning new
+.B zmprov
+processes to handle each account. Any occurance of the string "{}" in
+\fIPROVCMD\fR is replaced by the account name.  \fIPROVCMD\fR is
+terminated by a semi-colon, which must be escaped from the shell
+(ie. \\; \fIala\fR \fBfind\fR(1)).
+
+.TP
+\fB\-f\fR \fINAME\fR
+ find accounts by feature
+(ie. zimbraFeature\fINAME\fREnabled=TRUE). Feature can be IM,
+Calendar, etc.
+
+.TP
+\fB\-F\fR \fIADDRESS\fR
+find accounts that forward their mail to \fIADDRESS\fR
+
+.TP
+\fB\-H\fR \fIMAILHOST\fR
+find accounts by mail host
+
+.TP
+\fB\-m\fR \fIADDRESS\fR
+find accounts by mail \fIADDRESS\fR
+
+.TP
+\fB\-Q\fR \fIBYTES\fR
+find accounts with \fIBYTES\fR storage quota
+
+.TP
+\fB\-u\fR \fIUID\fR
+find accounts by \fIUID\fR
+
+.TP
+\fB\-Z\fR \fILIMIT\fR
+limit the number of results to \fLIMIT\fR
+
+.SH EXAMPLES
+.PP
+To quickly disable the IM feature for all students:
+.IP
+gmfind -f IM -C student -e ma {} zimbraFeatureIMEnabled FALSE \\;
+
+.SH AUTHOR
+M. Brent Harp
